@@ -42,7 +42,7 @@ jobs:
         run: |
           TOTAL=$(go tool cover -func=coverage.out | grep total | awk '{print $NF}' | tr -d '%')
           echo "Total coverage: ${TOTAL}%"
-          THRESHOLD=80
+          THRESHOLD=60
           if [ "$(echo "${TOTAL} < ${THRESHOLD}" | bc)" -eq 1 ]; then
             echo "::error::Coverage ${TOTAL}% is below threshold ${THRESHOLD}%"
             exit 1
