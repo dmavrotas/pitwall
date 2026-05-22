@@ -39,10 +39,10 @@ func (p *Parser) Parse(input string) (*QueryPlan, error) {
 
 	// If we couldn't detect an intent but have entities, try smart defaults
 	if intent == IntentUnknown {
-		intent = inferIntent(entities)
+		intent = inferIntent(&entities)
 	}
 
-	sql, desc, args := BuildQuery(intent, entities)
+	sql, desc, args := BuildQuery(intent, &entities)
 	if sql == "" {
 		return nil, &ParseError{
 			Input:  input,
@@ -122,7 +122,7 @@ func tokenize(input string) []string {
 }
 
 // inferIntent tries to determine intent from entities alone when keywords fail.
-func inferIntent(e Entities) Intent {
+func inferIntent(e *Entities) Intent {
 	if e.DriverID > 0 && e.DriverID2 > 0 {
 		return IntentHeadToHead
 	}
