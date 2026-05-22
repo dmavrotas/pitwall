@@ -85,14 +85,48 @@ func (ed *EntityDict) ExtractEntities(tokens []string) Entities {
 	e := Entities{}
 	input := strings.Join(tokens, " ")
 
-	// Extract year (4-digit number between 1950-2030)
-	for _, t := range tokens {
+	// Collect all year-looking tokens (4-digit, 1950-2030)
+	var years []int
+	var yearIdx []int
+	for i, t := range tokens {
 		if len(t) == 4 && t[0] >= '1' && t[0] <= '2' {
 			var y int
 			if _, err := fmt.Sscanf(t, "%d", &y); err == nil && y >= 1950 && y <= 2030 {
-				e.Year = y
+				years = append(years, y)
+				yearIdx = append(yearIdx, i)
 			}
 		}
+	}
+
+	switch len(years) {
+	case 0:
+		// no year — leave all year fields zero
+	case 1:
+		y := years[0]
+		prev := ""
+		if yearIdx[0] > 0 {
+			prev = tokens[yearIdx[0]-1]
+		}
+		switch prev {
+		case "since":
+			e.YearFrom = y
+		case "after":
+			e.YearFrom = y + 1
+		case "before":
+			e.YearTo = y - 1
+		case "until", "till":
+			e.YearTo = y
+		default:
+			e.Year = y
+		}
+	default:
+		// Two or more years → treat as a range (sorted)
+		lo, hi := years[0], years[1]
+		if lo > hi {
+			lo, hi = hi, lo
+		}
+		e.YearFrom = lo
+		e.YearTo = hi
 	}
 
 	// Try longest match first for multi-word names
@@ -147,6 +181,27 @@ func (ed *EntityDict) ExtractEntities(tokens []string) Entities {
 		}
 	}
 
+	// Detect modifier words. These are deliberately matched on the post-stopword
+	// token stream so they can sit anywhere in the query.
+	for i, t := range tokens {
+		switch t {
+		case "average", "avg":
+			e.Average = true
+		case "first":
+			e.Ordinal = "first"
+		case "last":
+			e.Ordinal = "last"
+		case "worst":
+			e.Ordinal = "worst"
+		case "per":
+			if i+1 < len(tokens) && tokens[i+1] == "race" {
+				e.PerRace = true
+			}
+		case "standings", "rankings", "ranking":
+			e.ShowFullStandings = true
+		}
+	}
+
 	// Disambiguate: if a name matched both driver and constructor,
 	// use surrounding context from the full input
 	_ = input
@@ -161,5 +216,11 @@ type Entities struct {
 	ConstructorID  int
 	ConstructorID2 int // for comparison queries
 	CircuitID      int
-	Year           int
+	Year           int    // single-year filter; mutually exclusive with YearFrom/YearTo
+	YearFrom       int    // inclusive lower bound for range filters
+	YearTo         int    // inclusive upper bound for range filters
+	Average           bool   // "average" → use AVG instead of SUM where applicable
+	PerRace           bool   // "per race" → normalize aggregate by COUNT(DISTINCT race_id)
+	Ordinal           string // "first", "last", "worst" — select a single row instead of aggregate
+	ShowFullStandings bool   // "standings"/"rankings" present → return full table instead of a single row
 }

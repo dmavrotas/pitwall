@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dmavrotas/pitwall/ai"
 	"github.com/dmavrotas/pitwall/loader"
 	"github.com/dmavrotas/pitwall/nlp"
 	"github.com/dmavrotas/pitwall/query"
@@ -24,12 +25,15 @@ func main() {
 func run() error {
 	dataDir := "data"
 	plain := false
+	useAI := false
 
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--plain":
 			plain = true
+		case "--ai":
+			useAI = true
 		default:
 			dataDir = args[i]
 		}
@@ -54,7 +58,18 @@ func run() error {
 	indexTime := time.Since(start)
 
 	parser := nlp.NewParser(ds)
-	engine := query.NewEngine(db, parser)
+
+	var engine *query.Engine
+	if useAI {
+		if os.Getenv("ANTHROPIC_API_KEY") == "" {
+			return fmt.Errorf("--ai requires ANTHROPIC_API_KEY to be set")
+		}
+		translator := ai.NewCache(ai.NewAnthropicTranslator("", ""))
+		engine = query.NewEngineWithAI(db, parser, translator)
+		fmt.Println("  AI fallback enabled.")
+	} else {
+		engine = query.NewEngine(db, parser)
+	}
 
 	if plain {
 		runPlain(engine)

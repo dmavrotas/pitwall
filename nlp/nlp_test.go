@@ -219,6 +219,66 @@ func TestExtractEntities(t *testing.T) {
 			tokens: []string{"hamilton"},
 			want:   Entities{DriverID: 1}, // Lewis, not Duncan
 		},
+		{
+			name:   "since year",
+			tokens: []string{"wins", "since", "2020"},
+			want:   Entities{YearFrom: 2020},
+		},
+		{
+			name:   "after year is exclusive",
+			tokens: []string{"wins", "after", "2015"},
+			want:   Entities{YearFrom: 2016},
+		},
+		{
+			name:   "before year is exclusive",
+			tokens: []string{"wins", "before", "2010"},
+			want:   Entities{YearTo: 2009},
+		},
+		{
+			name:   "until year is inclusive",
+			tokens: []string{"wins", "until", "2010"},
+			want:   Entities{YearTo: 2010},
+		},
+		{
+			name:   "between two years",
+			tokens: []string{"wins", "between", "2018", "2022"},
+			want:   Entities{YearFrom: 2018, YearTo: 2022},
+		},
+		{
+			name:   "from-to gets parsed as range (stop words stripped)",
+			tokens: []string{"wins", "2018", "2022"},
+			want:   Entities{YearFrom: 2018, YearTo: 2022},
+		},
+		{
+			name:   "swapped range gets sorted",
+			tokens: []string{"wins", "between", "2022", "2018"},
+			want:   Entities{YearFrom: 2018, YearTo: 2022},
+		},
+		{
+			name:   "average modifier",
+			tokens: []string{"average", "points", "hamilton"},
+			want:   Entities{DriverID: 1, Average: true},
+		},
+		{
+			name:   "per race modifier",
+			tokens: []string{"points", "per", "race", "hamilton"},
+			want:   Entities{DriverID: 1, PerRace: true},
+		},
+		{
+			name:   "first ordinal",
+			tokens: []string{"first", "win", "verstappen"},
+			want:   Entities{DriverID: 2, Ordinal: "first"},
+		},
+		{
+			name:   "last ordinal",
+			tokens: []string{"last", "win", "hamilton"},
+			want:   Entities{DriverID: 1, Ordinal: "last"},
+		},
+		{
+			name:   "worst ordinal",
+			tokens: []string{"worst", "finish", "hamilton"},
+			want:   Entities{DriverID: 1, Ordinal: "worst"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -304,7 +364,7 @@ func TestInferIntent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := inferIntent(tt.entities)
+			got := inferIntent(&tt.entities)
 			if got != tt.want {
 				t.Errorf("inferIntent(%+v) = %v, want %v", tt.entities, got, tt.want)
 			}
@@ -373,12 +433,20 @@ func TestBuildQueryReturnsSQL(t *testing.T) {
 		{"teammates with year", IntentTeammates, Entities{DriverID: 1, Year: 2020}, true},
 		{"head to head drivers + year", IntentHeadToHead, Entities{DriverID: 1, DriverID2: 2, Year: 2020}, true},
 		{"head to head constructors + year", IntentHeadToHead, Entities{ConstructorID: 6, ConstructorID2: 9, Year: 2020}, true},
+		{"head to head driver vs team", IntentHeadToHead, Entities{DriverID: 1, ConstructorID: 6}, true},
+		{"head to head driver vs team + year", IntentHeadToHead, Entities{DriverID: 1, ConstructorID: 6, Year: 2020}, true},
 		{"championship driver + year", IntentChampionship, Entities{DriverID: 3, Year: 1985}, true},
+		{"championship year only (champion)", IntentChampionship, Entities{Year: 2008}, true},
+		{"championship year + standings (full)", IntentChampionship, Entities{Year: 2008, ShowFullStandings: true}, true},
+		{"wins with year range", IntentWins, Entities{YearFrom: 2018, YearTo: 2022}, true},
+		{"wins since year", IntentWins, Entities{YearFrom: 2020}, true},
+		{"wins until year", IntentWins, Entities{YearTo: 2010}, true},
+		{"points driver + range", IntentPoints, Entities{DriverID: 1, YearFrom: 2018, YearTo: 2022}, true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sql, desc, args := BuildQuery(tt.intent, tt.entities)
+			sql, desc, args := BuildQuery(tt.intent, &tt.entities)
 			if tt.wantSQL {
 				if sql == "" {
 					t.Errorf("BuildQuery(%v, %+v) returned empty SQL", tt.intent, tt.entities)
@@ -433,6 +501,26 @@ func TestParseErrorFromParser(t *testing.T) {
 	}
 }
 
+func TestChampionshipYearOnlyReturnsLimit1ByDefault(t *testing.T) {
+	sql, desc, _ := BuildQuery(IntentChampionship, &Entities{Year: 2008})
+	if !strings.Contains(sql, "LIMIT 1\n") && !strings.Contains(sql, "LIMIT 1") {
+		t.Errorf("expected LIMIT 1 for champion-only query, got SQL: %s", sql)
+	}
+	if !strings.Contains(desc, "Champion") {
+		t.Errorf("description = %q, expected to mention Champion", desc)
+	}
+}
+
+func TestChampionshipYearWithStandingsReturnsTop15(t *testing.T) {
+	sql, desc, _ := BuildQuery(IntentChampionship, &Entities{Year: 2008, ShowFullStandings: true})
+	if !strings.Contains(sql, "LIMIT 15") {
+		t.Errorf("expected LIMIT 15 for full standings, got SQL: %s", sql)
+	}
+	if !strings.Contains(desc, "standings") {
+		t.Errorf("description = %q, expected to mention standings", desc)
+	}
+}
+
 func TestBuildQueryArgsPopulated(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -452,7 +540,7 @@ func TestBuildQueryArgsPopulated(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, args := BuildQuery(tt.intent, tt.entities)
+			_, _, args := BuildQuery(tt.intent, &tt.entities)
 			for _, key := range tt.wantArgs {
 				if _, ok := args[key]; !ok {
 					t.Errorf("expected arg %q in args map, got %v", key, args)
