@@ -1,11 +1,9 @@
 package query
 
 import (
-	"context"
-	"sync/atomic"
+	"errors"
 	"testing"
 
-	"github.com/dmavrotas/pitwall/ai"
 	"github.com/dmavrotas/pitwall/loader"
 	"github.com/dmavrotas/pitwall/models"
 	"github.com/dmavrotas/pitwall/nlp"
@@ -127,49 +125,31 @@ func TestAsk(t *testing.T) {
 	}
 }
 
-type fakeTranslator struct {
-	calls atomic.Int64
-	res   ai.Result
-	err   error
-}
-
-func (f *fakeTranslator) Translate(_ context.Context, _ string) (ai.Result, error) {
-	f.calls.Add(1)
-	return f.res, f.err
-}
-
-func TestAIFallbackUsedOnlyWhenParserFails(t *testing.T) {
-	base := setupEngine(t)
-	fake := &fakeTranslator{
-		res: ai.Result{
-			SQL:         "SELECT forename || ' ' || surname AS driver FROM drivers ORDER BY id LIMIT 1",
-			Description: "first driver",
-		},
+// There is no LLM fallback: a question the rules and gonlu cannot understand is
+// reported as a parse error, with no result and no network call.
+func TestUnparseableQuestionIsAParseError(t *testing.T) {
+	engine := setupEngine(t)
+	res, err := engine.Ask("asdkjh qwe zzzz plugh")
+	if err == nil {
+		t.Fatalf("expected an error, got result %+v", res)
 	}
-	engine := NewEngineWithAI(base.db, base.parser, fake)
+	var pe *nlp.ParseError
+	if !errors.As(err, &pe) {
+		t.Errorf("error %T (%v) should be an *nlp.ParseError", err, err)
+	}
+	if res != nil {
+		t.Errorf("result should be nil on a parse error, got %+v", res)
+	}
+}
 
-	// Known intent — should hit the rules path, not the AI.
-	res, err := engine.Ask("Hamilton wins")
+func TestSourceNamesThePathUsed(t *testing.T) {
+	engine := setupEngine(t)
+	res, err := engine.Ask("Who has the most wins?")
 	if err != nil {
-		t.Fatalf("rules path failed: %v", err)
+		t.Fatal(err)
 	}
 	if res.Source != "rules" {
-		t.Errorf("expected source=rules, got %q", res.Source)
-	}
-	if fake.calls.Load() != 0 {
-		t.Errorf("AI was called for a rules-handled query")
-	}
-
-	// Gibberish — parser returns ParseError, AI takes over.
-	res, err = engine.Ask("xyzzy plugh frotz")
-	if err != nil {
-		t.Fatalf("AI fallback failed: %v", err)
-	}
-	if res.Source != "ai" {
-		t.Errorf("expected source=ai, got %q", res.Source)
-	}
-	if fake.calls.Load() != 1 {
-		t.Errorf("AI was called %d times, want 1", fake.calls.Load())
+		t.Errorf("Source = %q, want rules", res.Source)
 	}
 }
 

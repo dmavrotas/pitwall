@@ -45,8 +45,7 @@ pitwall> Compare Verstappen vs Hamilton
 - **Natural language queries** — ask in plain English, get structured answers
 - **14 data tables** — drivers, races, results, lap times, pit stops, qualifying, standings, circuits, and more
 - **Full-screen TUI** — F1-themed terminal interface with scrollable history and styled tables
-- **Offline by default** — deterministic rule-based parser, no external APIs required
-- **Optional AI fallback** — opt into Claude-backed text-to-SQL with `--ai` for questions the rule parser can't classify
+- **Fully offline and deterministic** — a rule-based parser completed by a small [gonlu](https://github.com/dmavrotas/gonlu) model; no network calls, no LLM, no API keys
 - **Fast** — loads 600K+ lap times and 27K+ results in under 2 seconds
 
 ## Supported Query Types
@@ -56,8 +55,8 @@ pitwall> Compare Verstappen vs Hamilton
 | Wins | "Who has the most wins?", "Ferrari wins in 2004", "First win for Verstappen" |
 | Points | "How many points did Hamilton score in 2019?", "Average points per race for Hamilton since 2018" |
 | Championships | "Who won the 2008 championship?" (champion only), "2021 championship standings" (full top-15) |
-| Poles | "Who got the most pole positions?" |
-| DNFs | "What are the most common DNF reasons?" |
+| Poles | "Who got the most pole positions?", "Pole positions for Ferrari", "Poles at Monza" |
+| DNFs | "What are the most common DNF reasons?", "DNF reasons for Ferrari", "DNFs at Monaco in 2019" |
 | Pit Stops | "Fastest pit stops in 2023" |
 | Fastest Laps | "Fastest laps at Silverstone" |
 | Comparisons | "Compare Verstappen vs Hamilton", "Hamilton vs Ferrari in 2018" |
@@ -72,6 +71,7 @@ pitwall> Compare Verstappen vs Hamilton
 - **Sprint era**: points totals include both grand prix and sprint contributions from 2021 onward.
 - **DNFs**: filtered by race status (`Finished` and `+N Lap` classifications excluded) — robust to NULL position fields.
 - **Driver-vs-team comparisons**: pair a driver and a constructor in the same question to get a side-by-side breakdown (best scoped to a year).
+- **Months**: Pitwall filters by year, not month. A month after a preposition ("who won in March 2021") is ignored, and the answer says so, instead of being mistaken for the March constructor or the driver Michael May.
 
 ## Typos and misspelled names
 
@@ -81,26 +81,24 @@ The rule engine is exact: "how many wins did hamliton have" would silently fall 
 questions generated from your own dataset's driver, team and circuit names, and it never overrides an entity
 the rules already found. Results answered this way are tagged `rules+gonlu`.
 
-Measured on the full name lists (885 drivers, 214 constructors, 78 circuits): 92% of misspelled driver
-surnames resolve to the right driver, against 2% for the rules alone (6% resolve to a different, closely spelled
-driver). On 28 ordinary phrasings, none got worse and two were corrected. This was measured on names only, without
-the race results, so treat it as indicative until it has been run against the full dataset.
+Measured on the full Ergast dataset (867 drivers, 214 constructors; every misspelling injects one deletion or
+transposition), the rules alone resolve about 3% of misspelled driver surnames. With the learned layer:
 
-## AI fallback (optional)
+| Misspelled name in the frame | resolved to the right entity |
+|---|---|
+| driver in "how many wins did X have" | 93% |
+| driver in "how many points did X score in 2019" | 91% |
+| driver in "who were the teammates of X" | 90% |
+| driver in "tell me about X" | 75% |
+| driver in "X wins in 2019" | 56% |
+| constructor in "how many titles has X won" | 90% |
+| constructor in "X wins in 2004" | 85% |
+| constructor in "how many races did X win" | 82% |
 
-When the rule-based parser can't classify a question, you can optionally fall back to Claude to translate the question into a sandboxed `SELECT`. Disabled by default — the offline guarantee is preserved unless you explicitly opt in.
-
-```bash
-export ANTHROPIC_API_KEY=...
-go run ./cmd --ai data/
-```
-
-The fallback path:
-- Uses Claude Haiku 5.5 by default; opt up with `--ai-model <model-id>` (e.g. `--ai-model claude-sonnet-5-5`).
-- Tries the rule parser first; AI is only invoked on `ParseError`.
-- Generated SQL is validated before execution: SELECT/WITH-only, no `;` chains, allowlisted tables.
-- Identical questions are cached in-process for the lifetime of the session.
-- Each result is tagged with `Source: "rules"` or `Source: "ai"` so you can tell which path answered.
+The rest fall back to the old behaviour (no entity found), and about 3% of misspelled driver surnames resolve to a
+different driver. Nearly all of those are genuine ties (a transposition of one surname is also a substitution of another)
+or typos that spell another real surname; a match on a forename never beats a match on a surname. Ordinary questions are unaffected: on 36 everyday phrasings the learned layer
+acted on none, and a word the rules already know is never reinterpreted.
 
 ## Setup
 
@@ -127,9 +125,6 @@ go run ./cmd data/
 # Run in plain/pipe mode
 go run ./cmd --plain data/
 
-# Enable the AI fallback (requires ANTHROPIC_API_KEY)
-ANTHROPIC_API_KEY=... go run ./cmd --ai data/
-
 # Build binary
 go build -o pitwall ./cmd
 ./pitwall data/
@@ -151,13 +146,10 @@ golangci-lint run ./...
 ## Architecture
 
 ```
-User Question → Tokenizer → Entity Extraction → Intent Detection → SQL Builder → SQLite → Table Formatter
-                                                                       │
-                                                       (on ParseError) ↓ (opt-in, --ai)
-                                                                 Claude text-to-SQL → SQL Validator
+User Question → Tokenizer → Entity Extraction → Intent Detection → (gonlu gap-fill) → SQL Builder → SQLite → Table Formatter
 ```
 
-The system works in three stages, with an optional fourth:
+The system works in four stages:
 
 1. **NLP Layer** — Tokenizes input, removes stop words, extracts entities (drivers, teams, circuits, single year, year ranges, modifiers like "average" / "first" / "worst"), and detects query intent via keyword scoring with priority tiers.
 
@@ -165,7 +157,7 @@ The system works in three stages, with an optional fourth:
 
 3. **Store Layer** — All CSV data is loaded into an in-memory SQLite database (pure Go, no CGO) with indexes on foreign keys for fast joins.
 
-4. **AI Fallback (optional)** — When the rule parser fails and `--ai` is enabled, the question is sent to Claude. The returned SQL is validated against an allowlist of tables and a SELECT-only check before execution. Results are cached by normalized question.
+4. **Learned gap-filling** — A small offline [gonlu](https://github.com/dmavrotas/gonlu) model, trained at startup on questions generated from the dataset's own names, completes what the rules miss (misspelled names, a missing second entity). A question that neither the rules nor gonlu can understand is reported as a parse error; Pitwall never sends a question anywhere.
 
 ## Project Structure
 
@@ -182,13 +174,7 @@ pitwall/
 │   ├── entities.go       Name-to-ID dictionaries, year-range + modifier parsing
 │   ├── intents.go        Intent detection (14 types)
 │   └── templates.go      SQL template builder
-├── query/query.go        Engine + result types (rule + optional AI path)
-├── ai/
-│   ├── translator.go     Translator interface
-│   ├── anthropic.go      Claude SDK implementation
-│   ├── validator.go      SQL safety check (SELECT-only, allowlisted tables)
-│   ├── schema.go         Schema description for the prompt
-│   └── cache.go          In-process question cache
+├── query/query.go        Engine + result types
 ├── tui/tui.go            Terminal UI (bubbletea)
 ├── analysis/analysis.go  Batch analysis (standalone)
 ├── data/                 CSV files (not committed)

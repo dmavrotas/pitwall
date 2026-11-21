@@ -13,6 +13,7 @@ import (
 // dataset's own driver, team and circuit names. It never replaces the rules: it
 // only fills in what they missed (see fill).
 type learned struct {
+	dict  *EntityDict // the rules' own dictionaries: words found here are the rules' business
 	model *gonlu.Model
 	ids   map[string]map[string]int // slot type -> display name -> entity ID
 	skip  map[string]bool           // ordinary words that are never entity mentions
@@ -30,6 +31,7 @@ const (
 
 func newLearned(ed *EntityDict) *learned {
 	l := &learned{
+		dict: ed,
 		ids:  map[string]map[string]int{typeDriver: {}, typeConstructor: {}, typeCircuit: {}},
 		skip: map[string]bool{},
 	}
@@ -50,12 +52,8 @@ func newLearned(ed *EntityDict) *learned {
 	for w := range stopWords {
 		l.skip[w] = true
 	}
-	for _, def := range intentDefs {
-		for _, kw := range def.keywords {
-			for _, w := range strings.Fields(kw) {
-				l.skip[w] = true
-			}
-		}
+	for w := range reservedWords {
+		l.skip[w] = true
 	}
 
 	model, err := gonlu.Train(trainingData(ed), gonlu.Options{Robust: true, Entries: entries})
@@ -76,14 +74,18 @@ func (l *learned) fill(input string, e *Entities, intent *Intent) bool {
 	res := l.model.Parse(input)
 	entityAdded := false
 	for _, s := range res.Slots {
-		if s.Entry == "" || l.skip[s.Text] {
+		if l.allOrdinary(s.Text) || l.known(s.Text) {
 			continue
 		}
-		id := l.ids[s.Label][s.Entry]
+		typ, entry, ok := l.resolve(s.Label, s.Text)
+		if !ok || isForenameOnly(typ, s.Text, entry) {
+			continue
+		}
+		id := l.ids[typ][entry]
 		if id == 0 {
 			continue
 		}
-		switch s.Label {
+		switch typ {
 		case typeDriver:
 			entityAdded = setFirstFree(&e.DriverID, &e.DriverID2, id) || entityAdded
 		case typeConstructor:
@@ -98,6 +100,77 @@ func (l *learned) fill(input string, e *Entities, intent *Intent) bool {
 		*intent = Intent(res.Intent)
 	}
 	return entityAdded
+}
+
+// entityTypes is the order used to break ties between equally good matches.
+var entityTypes = []string{typeDriver, typeConstructor, typeCircuit}
+
+// taggedTypeBonus is the head start the tagger's own type gets in resolve. gonlu
+// charges one extra cost step for matching a single word of a multi-word entry
+// ("hamilton" for "Lewis Hamilton"), which would otherwise let a one-word team
+// name beat a driver on a typo. A different type must be better by more than
+// this to override the tagger.
+const taggedTypeBonus = 1
+
+// resolve finds which entity type a mention belongs to, mostly by the name
+// itself. The tagger says that something is mentioned and guesses its type from
+// the sentence frame, but frames such as "how many wins did X have" fit drivers
+// and teams alike, so that guess is unreliable. The mention is therefore linked
+// against every type and the closest match wins; the tagger's type gets only a
+// small head start (see taggedTypeBonus).
+func (l *learned) resolve(taggedAs, text string) (typ, entry string, ok bool) {
+	order := append([]string{taggedAs}, entityTypes...)
+	bestCost := 1 << 30
+	for _, t := range order {
+		if _, known := l.ids[t]; !known {
+			continue
+		}
+		cand, cost, found := l.model.Link(t, text)
+		if !found {
+			continue
+		}
+		if t == taggedAs {
+			cost -= taggedTypeBonus
+		}
+		if cost < bestCost { // strict: the first type tried wins ties
+			typ, entry, bestCost, ok = t, cand, cost, true
+		}
+	}
+	return typ, entry, ok
+}
+
+// known reports whether text is an exact key in the rule dictionaries. Such a
+// word was already handled (or deliberately skipped) by the rules, so the
+// learned layer, which exists for words the dictionaries do not know, such as
+// typos, leaves it alone. Otherwise a tagger that is unsure of the context could
+// reinterpret a circuit as a near-spelled driver ("suzuka" vs "Suzuki").
+func (l *learned) known(text string) bool {
+	return l.dict.Drivers[text] > 0 || l.dict.Constructors[text] > 0 || l.dict.Circuits[text] > 0
+}
+
+// allOrdinary reports whether every word of a mention is ordinary question
+// vocabulary ("driver", "a driver", "will"). Such a span is never an entity,
+// whichever name it happens to be close to.
+func (l *learned) allOrdinary(text string) bool {
+	words := strings.Fields(text)
+	for _, w := range words {
+		if !l.skip[w] {
+			return false
+		}
+	}
+	return len(words) > 0
+}
+
+// isForenameOnly reports whether a driver mention is just the first word of the
+// entry's full name ("will" for "Will Stevens"). People refer to drivers by
+// surname or full name, and the rule engine never matches a bare forename, so
+// linking one would turn ordinary words ("who will win") into drivers.
+func isForenameOnly(label, text, entry string) bool {
+	if label != typeDriver || strings.Contains(text, " ") {
+		return false
+	}
+	parts := strings.Fields(strings.ToLower(entry))
+	return len(parts) > 1 && parts[0] == text
 }
 
 // setFirstFree stores id in the first empty of two slots, ignoring duplicates.

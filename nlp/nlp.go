@@ -1,6 +1,7 @@
 package nlp
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -40,6 +41,7 @@ func NewRulesOnlyParser(ds *loader.Dataset) *Parser {
 
 // Parse takes a natural language question and returns a QueryPlan.
 func (p *Parser) Parse(input string) (*QueryPlan, error) {
+	input, months := stripMonths(input)
 	tokens := tokenize(input)
 	if len(tokens) == 0 {
 		return nil, &ParseError{Input: input, Reason: "empty query"}
@@ -68,7 +70,7 @@ func (p *Parser) Parse(input string) (*QueryPlan, error) {
 		Intent:      intent,
 		SQL:         sql,
 		Args:        args,
-		Description: desc,
+		Description: desc + monthNote(months),
 		Learned:     learnedUsed,
 	}, nil
 }
@@ -168,4 +170,30 @@ var stopWords = map[string]bool{
 	"on": true, "it": true, "its": true, "that": true, "this": true,
 	"all": true, "any": true, "some": true, "their": true, "his": true,
 	"her": true, "can": true, "could": true, "would": true, "should": true,
+}
+
+// monthRe matches a month name that follows a preposition ("in March", "during
+// may"). Only that form is treated as a month: with no preposition, a word such as
+// "march" is more likely the March constructor, and "may" is reserved anyway.
+var monthRe = regexp.MustCompile(`(?i)\b(in|during|of|since|until|till|before|after|by|from|on)\s+(january|february|march|april|may|june|july|august|september|october|november|december)\b`)
+
+// stripMonths removes months used as dates from the question, returning the rest
+// and the month names (title-cased). Pitwall cannot filter by month, so without
+// this "who won in March" would read as a question about the March constructor
+// and "in May" about the driver Michael May.
+func stripMonths(input string) (cleaned string, months []string) {
+	cleaned = monthRe.ReplaceAllStringFunc(input, func(m string) string {
+		parts := strings.Fields(m)
+		months = append(months, strings.ToUpper(parts[1][:1])+strings.ToLower(parts[1][1:]))
+		return parts[0]
+	})
+	return cleaned, months
+}
+
+// monthNote tells the user that a month in the question was not applied.
+func monthNote(months []string) string {
+	if len(months) == 0 {
+		return ""
+	}
+	return " — month not applied (" + strings.Join(months, ", ") + "): Pitwall filters by year, not month"
 }
