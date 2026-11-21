@@ -17,7 +17,8 @@ User Input (English) → NLP Parser → SQL Query → In-Memory SQLite → Forma
   - `entities.go` — Builds name-to-ID dictionaries from the dataset. Disambiguates by popularity (result count).
   - `intents.go` — Keyword-based intent detection with priority tiers (action intents > info intents).
   - `templates.go` — SQL template builder per intent, with dynamic filters for driver/constructor/circuit/year.
-  - `nlp.go` — Orchestrator: tokenize → extract entities → detect intent → build SQL → return QueryPlan.
+  - `nlp.go` — Orchestrator: tokenize → extract entities → detect intent → (learned gap-fill) → build SQL → return QueryPlan.
+  - `learned.go` — Optional [gonlu](https://github.com/dmavrotas/gonlu) layer trained at startup on synthetic questions built from the dataset's own names. It only *fills gaps* the rules left (misspelled driver/team/circuit names, a missing second entity); it never overrides an entity the rules found, and `NewRulesOnlyParser` disables it.
 - `query/` — Query engine that ties NLP parser to SQLite store. Returns structured `QueryResult`.
 - `ai/` — Optional Claude text-to-SQL fallback (`--ai`, needs `ANTHROPIC_API_KEY`; model via `--ai-model`, default Haiku 5.5). `validator.go` enforces SELECT-only + table allowlist; `cache.go` memoizes per question.
 - `analysis/` — Standalone batch analysis functions (legacy, still functional).
@@ -28,7 +29,7 @@ User Input (English) → NLP Parser → SQL Query → In-Memory SQLite → Forma
 ### Key Design Decisions
 - **Pure Go SQLite** (`modernc.org/sqlite`) — no CGO, fully portable, works offline.
 - **In-memory database** — data is read-only, loaded fresh each run. No disk artifacts.
-- **Pattern-based NLP first** — rules engine is primary and offline; the Claude fallback in `ai/` is opt-in and only runs on `ParseError`. Intent detection via keyword scoring with priority tiers. Deterministic, testable, debuggable.
+- **Pattern-based NLP first, learned gap-filling second** — rules engine is primary and offline; gonlu only completes what the rules missed (typos). Its intent is used only when it also found a new entity, so gibberish still fails and reaches the AI fallback; the Claude fallback in `ai/` is opt-in and only runs on `ParseError`. Intent detection via keyword scoring with priority tiers. Deterministic, testable, debuggable.
 - **Named parameter substitution** — SQL templates use `:param_name` placeholders, converted to positional `?` at query time by left-to-right scanning.
 - **Surname disambiguation** — when multiple drivers share a surname (e.g., "Hamilton"), the one with the most career race results wins the mapping.
 

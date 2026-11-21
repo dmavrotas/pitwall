@@ -2,13 +2,28 @@ package nlp
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/dmavrotas/pitwall/loader"
 )
 
+// NamedID is a display name with the entity ID it refers to.
+type NamedID struct {
+	Name string
+	ID   int
+}
+
 // EntityDict holds lookup maps from name variants to IDs.
 type EntityDict struct {
+	// Ordered display names, most prominent first (drivers and constructors by
+	// number of race results, circuits by number of races hosted). The learned
+	// layer feeds them to gonlu so that ambiguous names resolve to the more
+	// prominent entity.
+	DriverNames      []NamedID
+	ConstructorNames []NamedID
+	CircuitNames     []NamedID
+
 	Drivers      map[string]int // "hamilton" -> 1, "lewis hamilton" -> 1, "ham" -> 1
 	Constructors map[string]int // "ferrari" -> 6, "red bull" -> 9
 	Circuits     map[string]int // "monza" -> 14, "silverstone" -> 9
@@ -76,6 +91,8 @@ func BuildEntityDict(ds *loader.Dataset) *EntityDict {
 		ed.Circuits[strings.ToLower(c.Ref)] = id
 		ed.Circuits[strings.ToLower(c.Location)] = id
 	}
+
+	ed.buildOrderedNames(ds, resultCount)
 
 	return ed
 }
@@ -211,16 +228,53 @@ func (ed *EntityDict) ExtractEntities(tokens []string) Entities {
 
 // Entities holds the extracted entity IDs from a query.
 type Entities struct {
-	DriverID       int
-	DriverID2      int // for comparison queries
-	ConstructorID  int
-	ConstructorID2 int // for comparison queries
-	CircuitID      int
-	Year           int    // single-year filter; mutually exclusive with YearFrom/YearTo
-	YearFrom       int    // inclusive lower bound for range filters
-	YearTo         int    // inclusive upper bound for range filters
+	DriverID          int
+	DriverID2         int // for comparison queries
+	ConstructorID     int
+	ConstructorID2    int // for comparison queries
+	CircuitID         int
+	Year              int    // single-year filter; mutually exclusive with YearFrom/YearTo
+	YearFrom          int    // inclusive lower bound for range filters
+	YearTo            int    // inclusive upper bound for range filters
 	Average           bool   // "average" → use AVG instead of SUM where applicable
 	PerRace           bool   // "per race" → normalize aggregate by COUNT(DISTINCT race_id)
 	Ordinal           string // "first", "last", "worst" — select a single row instead of aggregate
 	ShowFullStandings bool   // "standings"/"rankings" present → return full table instead of a single row
+}
+
+// buildOrderedNames fills the prominence-ordered display-name lists.
+func (ed *EntityDict) buildOrderedNames(ds *loader.Dataset, driverResults map[int]int) {
+	teamResults := make(map[int]int)
+	for i := range ds.Results {
+		teamResults[ds.Results[i].ConstructorID]++
+	}
+	circuitRaces := make(map[int]int)
+	for i := range ds.Races {
+		circuitRaces[ds.Races[i].CircuitID]++
+	}
+	byWeight := func(list []NamedID, weight map[int]int) {
+		sort.SliceStable(list, func(a, b int) bool {
+			if wa, wb := weight[list[a].ID], weight[list[b].ID]; wa != wb {
+				return wa > wb
+			}
+			return list[a].ID < list[b].ID
+		})
+	}
+	for i := range ds.Drivers {
+		d := &ds.Drivers[i]
+		ed.DriverNames = append(ed.DriverNames, NamedID{Name: strings.TrimSpace(d.Forename + " " + d.Surname), ID: d.ID})
+	}
+	for i := range ds.Constructors {
+		ed.ConstructorNames = append(ed.ConstructorNames, NamedID{Name: ds.Constructors[i].Name, ID: ds.Constructors[i].ID})
+	}
+	for i := range ds.Circuits {
+		c := &ds.Circuits[i]
+		ed.CircuitNames = append(ed.CircuitNames, NamedID{Name: c.Name, ID: c.ID})
+		if c.Location != "" && c.Location != c.Name {
+			ed.CircuitNames = append(ed.CircuitNames, NamedID{Name: c.Location, ID: c.ID})
+		}
+	}
+	byWeight(ed.DriverNames, driverResults)
+	byWeight(ed.ConstructorNames, teamResults)
+	byWeight(ed.CircuitNames, circuitRaces)
 }

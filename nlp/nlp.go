@@ -13,18 +13,29 @@ type QueryPlan struct {
 	SQL         string
 	Args        map[string]interface{}
 	Description string
+	// Learned is true when the learned layer (gonlu) filled in an entity or the
+	// intent that the rule engine missed, for example a misspelled name.
+	Learned bool
 }
 
 // Parser translates natural language questions into SQL query plans.
 type Parser struct {
 	entities *EntityDict
+	learned  *learned // nil for a rules-only parser
 }
 
 // NewParser creates a parser with entity dictionaries built from the dataset.
+// The rule engine stays primary; a small learned layer (gonlu) only fills in
+// entities and intents the rules missed, such as misspelled driver names.
 func NewParser(ds *loader.Dataset) *Parser {
-	return &Parser{
-		entities: BuildEntityDict(ds),
-	}
+	p := NewRulesOnlyParser(ds)
+	p.learned = newLearned(p.entities)
+	return p
+}
+
+// NewRulesOnlyParser creates a purely rule-based, fully deterministic parser.
+func NewRulesOnlyParser(ds *loader.Dataset) *Parser {
+	return &Parser{entities: BuildEntityDict(ds)}
 }
 
 // Parse takes a natural language question and returns a QueryPlan.
@@ -36,6 +47,9 @@ func (p *Parser) Parse(input string) (*QueryPlan, error) {
 
 	entities := p.entities.ExtractEntities(tokens)
 	intent := DetectIntent(tokens)
+
+	// Let the learned layer fill gaps the rules left (typos, missing second entity).
+	learnedUsed := p.learned != nil && p.learned.fill(input, &entities, &intent)
 
 	// If we couldn't detect an intent but have entities, try smart defaults
 	if intent == IntentUnknown {
@@ -55,6 +69,7 @@ func (p *Parser) Parse(input string) (*QueryPlan, error) {
 		SQL:         sql,
 		Args:        args,
 		Description: desc,
+		Learned:     learnedUsed,
 	}, nil
 }
 
@@ -96,21 +111,6 @@ func tokenize(input string) []string {
 	parts := strings.Fields(cleaned)
 
 	// Remove stop words
-	stopWords := map[string]bool{
-		"the": true, "a": true, "an": true, "is": true, "are": true,
-		"was": true, "were": true, "in": true, "at": true, "of": true,
-		"for": true, "to": true, "and": true, "or": true, "with": true,
-		"has": true, "had": true, "have": true, "do": true, "does": true,
-		"did": true, "be": true, "been": true, "being": true,
-		"show": true, "me": true, "tell": true, "give": true, "get": true,
-		"many": true, "much": true, "most": true, "what": true,
-		"who": true, "which": true, "how": true, "when": true, "where": true,
-		"i": true, "my": true, "about": true, "from": true, "by": true,
-		"on": true, "it": true, "its": true, "that": true, "this": true,
-		"all": true, "any": true, "some": true, "their": true, "his": true,
-		"her": true, "can": true, "could": true, "would": true, "should": true,
-	}
-
 	var filtered []string
 	for _, p := range parts {
 		if !stopWords[p] {
@@ -152,4 +152,20 @@ type ParseError struct {
 
 func (e *ParseError) Error() string {
 	return "could not understand: " + e.Reason
+}
+
+// stopWords are dropped before intent and entity detection.
+var stopWords = map[string]bool{
+	"the": true, "a": true, "an": true, "is": true, "are": true,
+	"was": true, "were": true, "in": true, "at": true, "of": true,
+	"for": true, "to": true, "and": true, "or": true, "with": true,
+	"has": true, "had": true, "have": true, "do": true, "does": true,
+	"did": true, "be": true, "been": true, "being": true,
+	"show": true, "me": true, "tell": true, "give": true, "get": true,
+	"many": true, "much": true, "most": true, "what": true,
+	"who": true, "which": true, "how": true, "when": true, "where": true,
+	"i": true, "my": true, "about": true, "from": true, "by": true,
+	"on": true, "it": true, "its": true, "that": true, "this": true,
+	"all": true, "any": true, "some": true, "their": true, "his": true,
+	"her": true, "can": true, "could": true, "would": true, "should": true,
 }
