@@ -317,6 +317,16 @@ func buildPolesQuery(e *Entities, args map[string]interface{}) (sql, desc string
 		filters = append(filters, "q.driver_id = :driver_id")
 		args["driver_id"] = e.DriverID
 	}
+	if e.ConstructorID > 0 {
+		filters = append(filters, "q.constructor_id = :constructor_id")
+		args["constructor_id"] = e.ConstructorID
+		desc = "Top drivers by pole positions for constructor" + yearDesc(e)
+	}
+	if e.CircuitID > 0 {
+		filters = append(filters, "ra.circuit_id = :circuit_id")
+		args["circuit_id"] = e.CircuitID
+		desc = "Top drivers by pole positions at circuit" + yearDesc(e)
+	}
 
 	where := "q.position = 1"
 	if len(filters) > 0 {
@@ -349,6 +359,16 @@ func buildDNFQuery(e *Entities, args map[string]interface{}) (sql, desc string) 
 		filters = append(filters, "r.driver_id = :driver_id")
 		args["driver_id"] = e.DriverID
 		desc = "DNF history for driver" + yearDesc(e)
+	}
+	if e.ConstructorID > 0 {
+		filters = append(filters, "r.constructor_id = :constructor_id")
+		args["constructor_id"] = e.ConstructorID
+		desc = "DNF reasons for constructor" + yearDesc(e)
+	}
+	if e.CircuitID > 0 {
+		filters = append(filters, "ra.circuit_id = :circuit_id")
+		args["circuit_id"] = e.CircuitID
+		desc = "DNF reasons at circuit" + yearDesc(e)
 	}
 
 	// A DNF = not classified at race end. The semantic signal in Ergast is the
