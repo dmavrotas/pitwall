@@ -55,8 +55,8 @@ pitwall> Compare Verstappen vs Hamilton
 | Wins | "Who has the most wins?", "Ferrari wins in 2004", "First win for Verstappen" |
 | Points | "How many points did Hamilton score in 2019?", "Average points per race for Hamilton since 2018" |
 | Championships | "Who won the 2008 championship?" (champion only), "2021 championship standings" (full top-15) |
-| Poles | "Who got the most pole positions?" |
-| DNFs | "What are the most common DNF reasons?" |
+| Poles | "Who got the most pole positions?", "Pole positions for Ferrari", "Poles at Monza" |
+| DNFs | "What are the most common DNF reasons?", "DNF reasons for Ferrari", "DNFs at Monaco in 2019" |
 | Pit Stops | "Fastest pit stops in 2023" |
 | Fastest Laps | "Fastest laps at Silverstone" |
 | Comparisons | "Compare Verstappen vs Hamilton", "Hamilton vs Ferrari in 2018" |
@@ -71,6 +71,7 @@ pitwall> Compare Verstappen vs Hamilton
 - **Sprint era**: points totals include both grand prix and sprint contributions from 2021 onward.
 - **DNFs**: filtered by race status (`Finished` and `+N Lap` classifications excluded) — robust to NULL position fields.
 - **Driver-vs-team comparisons**: pair a driver and a constructor in the same question to get a side-by-side breakdown (best scoped to a year).
+- **Months**: Pitwall filters by year, not month. A month after a preposition ("who won in March 2021") is ignored, and the answer says so, instead of being mistaken for the March constructor or the driver Michael May.
 
 ## Typos and misspelled names
 
@@ -85,17 +86,18 @@ transposition), the rules alone resolve about 3% of misspelled driver surnames. 
 
 | Misspelled name in the frame | resolved to the right entity |
 |---|---|
-| driver in "how many wins did X have" | 89% |
-| driver in "how many points did X score in 2019" | 88% |
-| driver in "who were the teammates of X" | 86% |
-| driver in "tell me about X" | 73% |
-| driver in "X wins in 2019" | 54% |
+| driver in "how many wins did X have" | 93% |
+| driver in "how many points did X score in 2019" | 91% |
+| driver in "who were the teammates of X" | 90% |
+| driver in "tell me about X" | 75% |
+| driver in "X wins in 2019" | 56% |
 | constructor in "how many titles has X won" | 90% |
 | constructor in "X wins in 2004" | 85% |
 | constructor in "how many races did X win" | 82% |
 
-The rest fall back to the old behaviour (no entity found), and about 6% of misspelled driver surnames resolve to a
-different, closely spelled driver. Ordinary questions are unaffected: on 36 everyday phrasings the learned layer
+The rest fall back to the old behaviour (no entity found), and about 3% of misspelled driver surnames resolve to a
+different driver. Nearly all of those are genuine ties (a transposition of one surname is also a substitution of another)
+or typos that spell another real surname; a match on a forename never beats a match on a surname. Ordinary questions are unaffected: on 36 everyday phrasings the learned layer
 acted on none, and a word the rules already know is never reinterpreted.
 
 ## Setup

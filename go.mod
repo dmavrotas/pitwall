@@ -6,7 +6,7 @@ require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/dmavrotas/gonlu v0.0.0-20261121231933-d46038025ccf
+	github.com/dmavrotas/gonlu v0.0.0-20261121232734-5396e7e54715
 	modernc.org/sqlite v1.47.0
 )
 
