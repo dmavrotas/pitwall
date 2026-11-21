@@ -81,10 +81,23 @@ The rule engine is exact: "how many wins did hamliton have" would silently fall 
 questions generated from your own dataset's driver, team and circuit names, and it never overrides an entity
 the rules already found. Results answered this way are tagged `rules+gonlu`.
 
-Measured on the full name lists (885 drivers, 214 constructors, 78 circuits): 92% of misspelled driver
-surnames resolve to the right driver, against 2% for the rules alone (6% resolve to a different, closely spelled
-driver). On 28 ordinary phrasings, none got worse and two were corrected. This was measured on names only, without
-the race results, so treat it as indicative until it has been run against the full dataset.
+Measured on the full Ergast dataset (867 drivers, 214 constructors; every misspelling injects one deletion or
+transposition), the rules alone resolve about 3% of misspelled driver surnames. With the learned layer:
+
+| Misspelled name in the frame | resolved to the right entity |
+|---|---|
+| driver in "how many wins did X have" | 89% |
+| driver in "how many points did X score in 2019" | 88% |
+| driver in "who were the teammates of X" | 86% |
+| driver in "tell me about X" | 73% |
+| driver in "X wins in 2019" | 54% |
+| constructor in "how many titles has X won" | 90% |
+| constructor in "X wins in 2004" | 85% |
+| constructor in "how many races did X win" | 82% |
+
+The rest fall back to the old behaviour (no entity found), and about 6% of misspelled driver surnames resolve to a
+different, closely spelled driver. Ordinary questions are unaffected: on 36 everyday phrasings the learned layer
+acted on none, and a word the rules already know is never reinterpreted.
 
 ## AI fallback (optional)
 

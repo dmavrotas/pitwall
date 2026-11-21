@@ -97,6 +97,36 @@ func BuildEntityDict(ds *loader.Dataset) *EntityDict {
 	return ed
 }
 
+// reservedWords are single words from Pitwall's own question vocabulary (intent
+// keywords, modifiers and generic nouns). A bare occurrence is never read as an
+// entity name, even when some driver's code or surname equals it: with the real
+// dataset "per" is Sergio Perez's code, "win" is Markus Winkelhock's, and
+// "driver" is Paddy Driver's surname, which turned "average points per race"
+// and "which driver has the most wins" into questions about those drivers. Full
+// names and multi-word names are unaffected.
+var reservedWords = buildReservedWords()
+
+func buildReservedWords() map[string]bool {
+	words := map[string]bool{}
+	for _, def := range intentDefs {
+		for _, kw := range def.keywords {
+			for _, w := range strings.Fields(kw) {
+				words[w] = true
+			}
+		}
+	}
+	for _, w := range []string{
+		"per", "average", "avg", "first", "last", "worst", "race", "races", "standings", "rankings", "ranking",
+		"driver", "drivers", "team", "teams", "constructor", "constructors", "circuit", "circuits",
+		"win", "wins", "won", "winner", "winners", "points", "season", "seasons",
+		// modal verbs double as surnames and forenames ("May", "Will")
+		"may", "might", "can", "could", "will", "would", "should", "must", "shall",
+	} {
+		words[w] = true
+	}
+	return words
+}
+
 // ExtractEntities finds driver, constructor, circuit, and year references in the input.
 func (ed *EntityDict) ExtractEntities(tokens []string) Entities {
 	e := Entities{}
@@ -164,6 +194,9 @@ func (ed *EntityDict) ExtractEntities(tokens []string) Entities {
 			}
 
 			phrase := strings.Join(tokens[i:i+n], " ")
+			if n == 1 && reservedWords[phrase] {
+				continue
+			}
 
 			if id, ok := ed.Drivers[phrase]; ok {
 				if e.DriverID == 0 {
