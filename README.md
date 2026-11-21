@@ -184,4 +184,6 @@ pitwall/
 
 ## License
 
+Code is licensed under Apache-2.0. See [LICENSE](LICENSE).
+
 Data sourced from [Ergast Motor Racing Data](http://ergast.com/mrd/) (CC0 public domain) and [Jolpi F1 API](http://api.jolpi.ca/ergast/f1/).
