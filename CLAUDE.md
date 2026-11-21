@@ -19,7 +19,7 @@ User Input (English) → NLP Parser → SQL Query → In-Memory SQLite → Forma
   - `templates.go` — SQL template builder per intent, with dynamic filters for driver/constructor/circuit/year.
   - `nlp.go` — Orchestrator: tokenize → extract entities → detect intent → build SQL → return QueryPlan.
 - `query/` — Query engine that ties NLP parser to SQLite store. Returns structured `QueryResult`.
-- `ai/` — Optional Claude text-to-SQL fallback (`--ai`, needs `ANTHROPIC_API_KEY`; model via `--ai-model`, default Haiku 4.5). `validator.go` enforces SELECT-only + table allowlist; `cache.go` memoizes per question.
+- `ai/` — Optional Claude text-to-SQL fallback (`--ai`, needs `ANTHROPIC_API_KEY`; model via `--ai-model`, default Haiku 5.5). `validator.go` enforces SELECT-only + table allowlist; `cache.go` memoizes per question.
 - `analysis/` — Standalone batch analysis functions (legacy, still functional).
 - `tui/` — Bubbletea-based terminal UI with F1 theming, scrollable history, styled tables.
 - `cmd/` — Entry point. Supports `--plain` flag for non-interactive/piped mode.

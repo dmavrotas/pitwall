@@ -17,16 +17,20 @@ type AnthropicTranslator struct {
 	model  anthropic.Model
 }
 
+// DefaultModel is the cheapest capable model, used unless the caller overrides it.
+// Declared as a string because the pinned SDK predates a constant for it.
+const DefaultModel anthropic.Model = "claude-haiku-5-5"
+
 // NewAnthropicTranslator builds a translator using the provided API key. If
 // apiKey is empty, the SDK falls back to the ANTHROPIC_API_KEY env var. The
-// model defaults to Claude Haiku 4.5 (cheapest capable); callers may override via opts.
+// model defaults to Claude Haiku 5.5 (cheapest capable); callers may override via opts.
 func NewAnthropicTranslator(apiKey string, model anthropic.Model) *AnthropicTranslator {
 	var opts []option.RequestOption
 	if apiKey != "" {
 		opts = append(opts, option.WithAPIKey(apiKey))
 	}
 	if model == "" {
-		model = anthropic.ModelClaudeHaiku4_5
+		model = DefaultModel
 	}
 	return &AnthropicTranslator{
 		client: anthropic.NewClient(opts...),
