@@ -73,6 +73,19 @@ pitwall> Compare Verstappen vs Hamilton
 - **DNFs**: filtered by race status (`Finished` and `+N Lap` classifications excluded) — robust to NULL position fields.
 - **Driver-vs-team comparisons**: pair a driver and a constructor in the same question to get a side-by-side breakdown (best scoped to a year).
 
+## Typos and misspelled names
+
+The rule engine is exact: "how many wins did hamliton have" would silently fall back to the generic
+"most wins" answer. A small, offline, deterministic learned layer built on
+[gonlu](https://github.com/dmavrotas/gonlu) now fills in what the rules miss. It is trained at startup on
+questions generated from your own dataset's driver, team and circuit names, and it never overrides an entity
+the rules already found. Results answered this way are tagged `rules+gonlu`.
+
+Measured on the full name lists (885 drivers, 214 constructors, 78 circuits): 92% of misspelled driver
+surnames resolve to the right driver, against 2% for the rules alone (6% resolve to a different, closely spelled
+driver). On 28 ordinary phrasings, none got worse and two were corrected. This was measured on names only, without
+the race results, so treat it as indicative until it has been run against the full dataset.
+
 ## AI fallback (optional)
 
 When the rule-based parser can't classify a question, you can optionally fall back to Claude to translate the question into a sandboxed `SELECT`. Disabled by default — the offline guarantee is preserved unless you explicitly opt in.

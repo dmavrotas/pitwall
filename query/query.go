@@ -33,7 +33,7 @@ type Result struct {
 	Description string
 	Columns     []string
 	Rows        [][]string
-	Source      string // "rules" or "ai" — useful for UI and debugging
+	Source      string // "rules", "rules+gonlu" or "ai" — useful for UI and debugging
 }
 
 // Ask processes a natural language question and returns structured results.
@@ -48,7 +48,7 @@ func (e *Engine) Ask(question string) (*Result, error) {
 			Description: plan.Description,
 			Columns:     cols,
 			Rows:        rows,
-			Source:      "rules",
+			Source:      source(plan),
 		}, nil
 	}
 
@@ -70,4 +70,12 @@ func (e *Engine) Ask(question string) (*Result, error) {
 	}
 
 	return nil, parseErr
+}
+
+// source names the path that produced a plan.
+func source(plan *nlp.QueryPlan) string {
+	if plan.Learned {
+		return "rules+gonlu"
+	}
+	return "rules"
 }
