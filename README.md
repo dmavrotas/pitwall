@@ -45,8 +45,7 @@ pitwall> Compare Verstappen vs Hamilton
 - **Natural language queries** — ask in plain English, get structured answers
 - **14 data tables** — drivers, races, results, lap times, pit stops, qualifying, standings, circuits, and more
 - **Full-screen TUI** — F1-themed terminal interface with scrollable history and styled tables
-- **Offline by default** — deterministic rule-based parser, no external APIs required
-- **Optional AI fallback** — opt into Claude-backed text-to-SQL with `--ai` for questions the rule parser can't classify
+- **Fully offline and deterministic** — a rule-based parser completed by a small [gonlu](https://github.com/dmavrotas/gonlu) model; no network calls, no LLM, no API keys
 - **Fast** — loads 600K+ lap times and 27K+ results in under 2 seconds
 
 ## Supported Query Types
@@ -99,22 +98,6 @@ The rest fall back to the old behaviour (no entity found), and about 6% of missp
 different, closely spelled driver. Ordinary questions are unaffected: on 36 everyday phrasings the learned layer
 acted on none, and a word the rules already know is never reinterpreted.
 
-## AI fallback (optional)
-
-When the rule-based parser can't classify a question, you can optionally fall back to Claude to translate the question into a sandboxed `SELECT`. Disabled by default — the offline guarantee is preserved unless you explicitly opt in.
-
-```bash
-export ANTHROPIC_API_KEY=...
-go run ./cmd --ai data/
-```
-
-The fallback path:
-- Uses Claude Haiku 5.5 by default; opt up with `--ai-model <model-id>` (e.g. `--ai-model claude-sonnet-5-5`).
-- Tries the rule parser first; AI is only invoked on `ParseError`.
-- Generated SQL is validated before execution: SELECT/WITH-only, no `;` chains, allowlisted tables.
-- Identical questions are cached in-process for the lifetime of the session.
-- Each result is tagged with `Source: "rules"` or `Source: "ai"` so you can tell which path answered.
-
 ## Setup
 
 ### Prerequisites
@@ -140,9 +123,6 @@ go run ./cmd data/
 # Run in plain/pipe mode
 go run ./cmd --plain data/
 
-# Enable the AI fallback (requires ANTHROPIC_API_KEY)
-ANTHROPIC_API_KEY=... go run ./cmd --ai data/
-
 # Build binary
 go build -o pitwall ./cmd
 ./pitwall data/
@@ -164,13 +144,10 @@ golangci-lint run ./...
 ## Architecture
 
 ```
-User Question → Tokenizer → Entity Extraction → Intent Detection → SQL Builder → SQLite → Table Formatter
-                                                                       │
-                                                       (on ParseError) ↓ (opt-in, --ai)
-                                                                 Claude text-to-SQL → SQL Validator
+User Question → Tokenizer → Entity Extraction → Intent Detection → (gonlu gap-fill) → SQL Builder → SQLite → Table Formatter
 ```
 
-The system works in three stages, with an optional fourth:
+The system works in four stages:
 
 1. **NLP Layer** — Tokenizes input, removes stop words, extracts entities (drivers, teams, circuits, single year, year ranges, modifiers like "average" / "first" / "worst"), and detects query intent via keyword scoring with priority tiers.
 
@@ -178,7 +155,7 @@ The system works in three stages, with an optional fourth:
 
 3. **Store Layer** — All CSV data is loaded into an in-memory SQLite database (pure Go, no CGO) with indexes on foreign keys for fast joins.
 
-4. **AI Fallback (optional)** — When the rule parser fails and `--ai` is enabled, the question is sent to Claude. The returned SQL is validated against an allowlist of tables and a SELECT-only check before execution. Results are cached by normalized question.
+4. **Learned gap-filling** — A small offline [gonlu](https://github.com/dmavrotas/gonlu) model, trained at startup on questions generated from the dataset's own names, completes what the rules miss (misspelled names, a missing second entity). A question that neither the rules nor gonlu can understand is reported as a parse error; Pitwall never sends a question anywhere.
 
 ## Project Structure
 
@@ -195,13 +172,7 @@ pitwall/
 │   ├── entities.go       Name-to-ID dictionaries, year-range + modifier parsing
 │   ├── intents.go        Intent detection (14 types)
 │   └── templates.go      SQL template builder
-├── query/query.go        Engine + result types (rule + optional AI path)
-├── ai/
-│   ├── translator.go     Translator interface
-│   ├── anthropic.go      Claude SDK implementation
-│   ├── validator.go      SQL safety check (SELECT-only, allowlisted tables)
-│   ├── schema.go         Schema description for the prompt
-│   └── cache.go          In-process question cache
+├── query/query.go        Engine + result types
 ├── tui/tui.go            Terminal UI (bubbletea)
 ├── analysis/analysis.go  Batch analysis (standalone)
 ├── data/                 CSV files (not committed)

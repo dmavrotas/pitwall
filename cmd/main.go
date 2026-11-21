@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dmavrotas/pitwall/ai"
 	"github.com/dmavrotas/pitwall/loader"
 	"github.com/dmavrotas/pitwall/nlp"
 	"github.com/dmavrotas/pitwall/query"
@@ -22,29 +21,36 @@ func main() {
 	}
 }
 
-func run() error {
-	dataDir := "data"
-	plain := false
-	useAI := false
-	aiModel := ""
+// config holds the parsed command line.
+type config struct {
+	dataDir string
+	plain   bool
+}
 
-	args := os.Args[1:]
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--ai-model":
-			if i+1 >= len(args) {
-				return fmt.Errorf("--ai-model requires a model name")
-			}
-			i++
-			aiModel = args[i]
-		case "--plain":
-			plain = true
-		case "--ai":
-			useAI = true
+// parseArgs reads the command line. Anything that looks like a flag but is not
+// known is rejected, so that removed options (the old LLM flags) fail with a
+// clear message instead of being mistaken for a data directory.
+func parseArgs(args []string) (config, error) {
+	cfg := config{dataDir: "data"}
+	for _, a := range args {
+		switch {
+		case a == "--plain":
+			cfg.plain = true
+		case strings.HasPrefix(a, "-"):
+			return cfg, fmt.Errorf("unknown flag %q (usage: pitwall [--plain] [data-dir])", a)
 		default:
-			dataDir = args[i]
+			cfg.dataDir = a
 		}
 	}
+	return cfg, nil
+}
+
+func run() error {
+	cfg, err := parseArgs(os.Args[1:])
+	if err != nil {
+		return err
+	}
+	dataDir, plain := cfg.dataDir, cfg.plain
 
 	fmt.Println("\n  Loading F1 dataset...")
 
@@ -66,17 +72,7 @@ func run() error {
 
 	parser := nlp.NewParser(ds)
 
-	var engine *query.Engine
-	if useAI {
-		if os.Getenv("ANTHROPIC_API_KEY") == "" {
-			return fmt.Errorf("--ai requires ANTHROPIC_API_KEY to be set")
-		}
-		translator := ai.NewCache(ai.NewAnthropicTranslator("", aiModel))
-		engine = query.NewEngineWithAI(db, parser, translator)
-		fmt.Println("  AI fallback enabled.")
-	} else {
-		engine = query.NewEngine(db, parser)
-	}
+	engine := query.NewEngine(db, parser)
 
 	if plain {
 		runPlain(engine)
