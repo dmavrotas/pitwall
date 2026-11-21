@@ -26,10 +26,17 @@ func run() error {
 	dataDir := "data"
 	plain := false
 	useAI := false
+	aiModel := ""
 
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--ai-model":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--ai-model requires a model name")
+			}
+			i++
+			aiModel = args[i]
 		case "--plain":
 			plain = true
 		case "--ai":
@@ -64,7 +71,7 @@ func run() error {
 		if os.Getenv("ANTHROPIC_API_KEY") == "" {
 			return fmt.Errorf("--ai requires ANTHROPIC_API_KEY to be set")
 		}
-		translator := ai.NewCache(ai.NewAnthropicTranslator("", ""))
+		translator := ai.NewCache(ai.NewAnthropicTranslator("", aiModel))
 		engine = query.NewEngineWithAI(db, parser, translator)
 		fmt.Println("  AI fallback enabled.")
 	} else {

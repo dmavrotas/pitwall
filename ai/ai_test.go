@@ -130,3 +130,15 @@ func TestCacheDoesNotStoreErrors(t *testing.T) {
 		t.Errorf("inner translator called %d times, want 3 (errors should not cache)", got)
 	}
 }
+
+func TestNewAnthropicTranslatorModel(t *testing.T) {
+	if got := NewAnthropicTranslator("k", "").model; got != DefaultModel {
+		t.Errorf("default model = %q, want %q", got, DefaultModel)
+	}
+	if DefaultModel != "claude-haiku-5-5" {
+		t.Errorf("DefaultModel = %q, want claude-haiku-5-5", DefaultModel)
+	}
+	if got := NewAnthropicTranslator("k", "claude-sonnet-5-5").model; got != "claude-sonnet-5-5" {
+		t.Errorf("override model = %q", got)
+	}
+}

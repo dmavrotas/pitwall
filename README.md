@@ -83,6 +83,7 @@ go run ./cmd --ai data/
 ```
 
 The fallback path:
+- Uses Claude Haiku 5.5 by default; opt up with `--ai-model <model-id>` (e.g. `--ai-model claude-sonnet-5-5`).
 - Tries the rule parser first; AI is only invoked on `ParseError`.
 - Generated SQL is validated before execution: SELECT/WITH-only, no `;` chains, allowlisted tables.
 - Identical questions are cached in-process for the lifetime of the session.
