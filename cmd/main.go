@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/dmavrotas/pitwall/ai"
 	"github.com/dmavrotas/pitwall/loader"
 	"github.com/dmavrotas/pitwall/nlp"
@@ -72,7 +71,7 @@ func run() error {
 		if os.Getenv("ANTHROPIC_API_KEY") == "" {
 			return fmt.Errorf("--ai requires ANTHROPIC_API_KEY to be set")
 		}
-		translator := ai.NewCache(ai.NewAnthropicTranslator("", anthropic.Model(aiModel)))
+		translator := ai.NewCache(ai.NewAnthropicTranslator("", aiModel))
 		engine = query.NewEngineWithAI(db, parser, translator)
 		fmt.Println("  AI fallback enabled.")
 	} else {
