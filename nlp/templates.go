@@ -148,17 +148,27 @@ LIMIT 1`, where, order)
 		where += " AND " + strings.Join(filters, " AND ")
 	}
 
+	// One row per driver. Grouping by driver AND team lets the window functions
+	// total the wins across teams and pick the team with the most wins (the most
+	// recent one on a tie). A bare "c.name" under GROUP BY driver would give an
+	// arbitrary row's team, wrong for anyone who changed teams.
 	sql = fmt.Sprintf(`
-SELECT d.forename || ' ' || d.surname AS driver,
-       c.name AS team,
-       COUNT(*) AS wins
-FROM results r
-JOIN drivers d ON d.id = r.driver_id
-JOIN constructors c ON c.id = r.constructor_id
-JOIN races ra ON ra.id = r.race_id
-WHERE %s
-GROUP BY r.driver_id
-ORDER BY wins DESC
+SELECT driver, team, wins
+FROM (
+    SELECT d.forename || ' ' || d.surname AS driver,
+           c.name AS team,
+           SUM(COUNT(*)) OVER (PARTITION BY r.driver_id) AS wins,
+           ROW_NUMBER() OVER (PARTITION BY r.driver_id
+                              ORDER BY COUNT(*) DESC, MAX(ra.date) DESC) AS rk
+    FROM results r
+    JOIN drivers d ON d.id = r.driver_id
+    JOIN constructors c ON c.id = r.constructor_id
+    JOIN races ra ON ra.id = r.race_id
+    WHERE %s
+    GROUP BY r.driver_id, r.constructor_id
+)
+WHERE rk = 1
+ORDER BY wins DESC, driver
 LIMIT 15`, where)
 
 	return sql, desc
@@ -189,10 +199,12 @@ func buildPointsQuery(e *Entities, args map[string]interface{}) (sql, desc strin
 
 	// Union main results with sprint results so championship-point totals
 	// include sprint contributions for the 2021+ era.
-	pointsExpr := "ROUND(SUM(ap.points), 1) AS total_points"
+	// pts and races are totals across all of a driver's teams (window sums over
+	// the per-team groups below).
+	pointsExpr := "ROUND(pts, 1) AS total_points"
 	orderCol := "total_points"
 	if e.Average || e.PerRace {
-		pointsExpr = "ROUND(SUM(ap.points) * 1.0 / COUNT(DISTINCT ap.race_id), 2) AS points_per_race"
+		pointsExpr = "ROUND(pts * 1.0 / races, 2) AS points_per_race"
 		orderCol = "points_per_race"
 		desc = "Points per race" + yearDesc(e)
 		if e.DriverID > 0 {
@@ -200,23 +212,30 @@ func buildPointsQuery(e *Entities, args map[string]interface{}) (sql, desc strin
 		}
 	}
 
+	// Same per-driver, team-of-most-points approach as buildWinsQuery.
 	sql = fmt.Sprintf(`
 WITH all_points AS (
     SELECT driver_id, constructor_id, race_id, points FROM results
     UNION ALL
     SELECT driver_id, constructor_id, race_id, points FROM sprint_results
 )
-SELECT d.forename || ' ' || d.surname AS driver,
-       c.name AS team,
-       %s,
-       COUNT(DISTINCT ap.race_id) AS races
-FROM all_points ap
-JOIN drivers d ON d.id = ap.driver_id
-JOIN constructors c ON c.id = ap.constructor_id
-JOIN races ra ON ra.id = ap.race_id
-WHERE %s
-GROUP BY ap.driver_id
-ORDER BY %s DESC
+SELECT driver, team, %s, races
+FROM (
+    SELECT d.forename || ' ' || d.surname AS driver,
+           c.name AS team,
+           SUM(SUM(ap.points)) OVER (PARTITION BY ap.driver_id) AS pts,
+           SUM(COUNT(DISTINCT ap.race_id)) OVER (PARTITION BY ap.driver_id) AS races,
+           ROW_NUMBER() OVER (PARTITION BY ap.driver_id
+                              ORDER BY SUM(ap.points) DESC, MAX(ra.date) DESC) AS rk
+    FROM all_points ap
+    JOIN drivers d ON d.id = ap.driver_id
+    JOIN constructors c ON c.id = ap.constructor_id
+    JOIN races ra ON ra.id = ap.race_id
+    WHERE %s
+    GROUP BY ap.driver_id, ap.constructor_id
+)
+WHERE rk = 1
+ORDER BY %s DESC, driver
 LIMIT 15`, pointsExpr, where, orderCol)
 
 	return sql, desc
